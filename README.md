@@ -9,5 +9,5 @@ cargo run
 ## Flash
 
 ```shell
-cargo flash --chip STM32G431KBTx --connect-under-reset
+cargo flash --chip STM32F446RE --connect-under-reset
 ```
