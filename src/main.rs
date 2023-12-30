@@ -1,30 +1,29 @@
 #![no_std]
 #![no_main]
 
+mod cancom;
+mod measure;
+
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::bind_interrupts;
-use embassy_stm32::can::{Can, Envelope, Rx0InterruptHandler, Rx1InterruptHandler, SceInterruptHandler, TxInterruptHandler};
-use embassy_stm32::can::bxcan::{Fifo, Id};
-use embassy_stm32::can::bxcan::filter::Mask32;
+use embassy_stm32::adc::{Adc, Resolution, SampleTime, VrefInt};
+use embassy_stm32::can::{Can, Envelope};
+use embassy_stm32::can::bxcan::Id;
 use embassy_stm32::gpio::{AnyPin, Level, Output, Pin, Speed};
-use embassy_stm32::peripherals::{CAN1};
-use embassy_time::Timer;
+use embassy_stm32::peripherals::{ADC1, CAN1, PA1};
+use embassy_time::{Delay, Timer};
+use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
 use static_cell::StaticCell;
 
-use {defmt_rtt as _, panic_probe as _};
+use crate::cancom::create_can;
+use crate::measure::{convert_to_millivolts, MAX_ADC_SAMPLE};
 
-bind_interrupts!(struct Irqs {
-    CAN1_RX0 => Rx0InterruptHandler<CAN1>;
-    CAN1_RX1 => Rx1InterruptHandler<CAN1>;
-    CAN1_SCE => SceInterruptHandler<CAN1>;
-    CAN1_TX => TxInterruptHandler<CAN1>;
-});
+use {defmt_rtt as _, panic_probe as _};
 
 #[embassy_executor::task]
 async fn led_control(can: &'static mut Can<'static, CAN1>, pin: AnyPin) {
 
-    info!("LED Control started");
+    info!("LED Control task started");
 
     let mut led = Output::new(pin, Level::High, Speed::Low);
     led.set_low();
@@ -46,33 +45,48 @@ async fn led_control(can: &'static mut Can<'static, CAN1>, pin: AnyPin) {
     }
 }
 
+#[embassy_executor::task]
+async fn measure(adc: &'static mut Adc<'static, ADC1>, mut pin: PA1) {
+
+    info!("Measure task started");
+
+    let mut delay = Delay;
+
+    let mut vrefint = adc.enable_vrefint();
+    delay.delay_us(VrefInt::start_time_us());
+
+    let vref = u32::from(adc.read(&mut vrefint));
+
+    info!("VCCA: {} mV", convert_to_millivolts(vref, MAX_ADC_SAMPLE));
+
+    info!("Measuring");
+
+    loop {
+        let value = adc.read(&mut pin);
+        info!("PA1: {} ({} mV)", value, convert_to_millivolts(vref, value));
+        Timer::after_millis(500).await;
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
 
     let peripherals = embassy_stm32::init(Default::default());
 
-    info!("Initializing CAN");
 
-    static CAN: StaticCell<Can<CAN1>> = StaticCell::new();
-    let can = CAN.init(Can::new(peripherals.CAN1, peripherals.PA11, peripherals.PA12, Irqs));
-
-    can.as_mut()
-        .modify_filters()
-        .enable_bank(0, Fifo::Fifo0, Mask32::accept_all());
-
-    can.as_mut()
-        .modify_config()
-        .set_loopback(false)
-        .set_silent(false)
-        .leave_disabled();
-
-    can.set_bitrate(1_000_000);
+    let can = create_can(peripherals.CAN1, peripherals.PA11, peripherals.PA12);
 
     can.enable().await;
 
-    info!("CAN initialized");
+    let mut delay = Delay;
+
+    static ADC: StaticCell<Adc<ADC1>> = StaticCell::new();
+    let adc = ADC.init(Adc::new(peripherals.ADC1, &mut delay));
+    adc.set_resolution(Resolution::EightBit);
+    adc.set_sample_time(SampleTime::Cycles3);
 
     spawner.spawn(led_control(can, peripherals.PA5.degrade())).unwrap();
+    spawner.spawn(measure(adc, peripherals.PA1)).unwrap();
 
     loop {
         Timer::after_secs(1).await;
