@@ -1,0 +1,19 @@
+[package]
+name = "stm32-g432k-example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cortex-m = { workspace = true, features = ["critical-section-single-core"] }
+cortex-m-rt = { workspace = true }
+defmt = { workspace = true }
+defmt-rtt = { workspace = true }
+embassy-executor = { workspace = true, features = ["arch-cortex-m", "executor-thread", "defmt", "integrated-timers"] }
+embassy-futures = { workspace = true }
+embassy-stm32 = { workspace = true, features = ["stm32g431kb", "defmt", "time-driver-any", "memory-x", "unstable-pac", "exti"] }
+embassy-sync = { workspace = true, features = ["defmt"] }
+embassy-time = { workspace = true, features = ["defmt", "defmt-timestamp-uptime", "tick-hz-32_768"] }
+futures = { workspace = true, default-features = false, features = ["async-await"] }
+heapless = { workspace = true, default-features = false }
+panic-probe = { workspace = true, features = ["print-defmt"] }
+static_cell = "2.0.0"
